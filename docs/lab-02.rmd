@@ -3,7 +3,7 @@ title: "Geography 176A"
 author: "[Chelsey Su](https://suchaoxi.github.io/geog176a_2020/)"
 subtitle: 'Lab 03: COVID-19 Pandemic'
 output: 
-  html_document: https://suchaoxi.github.io/geog-176A-labs/
+  html_document:
     theme: journal
 ---
 ```{r, message=FALSE, warning=FALSE}
