@@ -1,0 +1,194 @@
+---
+title: "Geography 176A"
+author: "[Chelsey Su](https://suchaoxi.github.io/geog176a_2020/)"
+subtitle: 'Lab 03: COVID-19 Pandemic'
+output: 
+  html_document:
+    theme: journal
+---
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(readxl)
+library(zoo)
+library(kableExtra)
+```
+
+-----------------------------------------------
+state.of.interest = "California"
+
+# answering Q1:
+
+```{r}
+covid = read_csv("https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv")
+
+state.of.interest = "California"
+
+state_new_cases = covid %>% 
+  filter(state == state.of.interest) %>% 
+  group_by(county) %>% 
+  mutate(new_daily_cases = cases - lag(cases)) %>% 
+  ungroup()
+```
+
+```{r, messages=FALSE, warning=FALSE}
+most_cumulative_cases = state_new_cases %>% 
+  group_by(county) %>% 
+  summarise(cum_cases = sum(cases)) %>% 
+  ungroup() %>% 
+  slice_max(cum_cases, n = 5)
+
+most_new_cases = state_new_cases %>% 
+  filter(date == max(date)) %>% 
+  slice_max(new_daily_cases, n = 5) %>% 
+  select(county, new_daily_cases)
+```
+
+
+
+```{r}
+knitr::kable(most_cumulative_cases, caption = "5 Counties with the Most Cumulative Cases", col.names = c("County", "Cumulative Cases"), format.args = list(big.mark = ",")) %>% 
+  kable_styling("striped", full_width = TRUE, font_size = 11) 
+
+knitr::kable(most_new_cases, caption = "5 Counties with the Most New Cases", col.names = c("County", "New Daily Cases"), format.args = list(big.mark = ",")) %>% 
+  kable_styling("striped", full_width = TRUE, font_size = 11)
+```
+```{r}
+PopulationEstimates <- read_excel("~/github/geog-176A-labs/data/PopulationEstimates.xls", skip = 2)
+
+CA_county_pop = PopulationEstimates %>% 
+  filter(State == "CA") %>% 
+  select(state = State, county = Area_Name, fips = FIPStxt, pop_19 = POP_ESTIMATE_2019)
+
+CA_covid = covid %>% 
+  filter(state == "California") %>% 
+  group_by(county, fips) %>% 
+  summarise(CA_covid_cases = sum(cases)) %>% 
+  ungroup()
+
+CA_covid_new = covid %>% 
+  filter(state == "California", date == max(date))
+```
+
+```{r}
+CA_per_cap = inner_join(CA_covid, CA_county_pop, by = "fips") %>% 
+  select(county.x, CA_covid_cases, pop_19) %>% 
+  mutate(most_per_cap = (CA_covid_cases / pop_19)) %>% 
+  slice_max(most_per_cap, n = 5)
+
+NEW_per_cap = left_join(CA_covid_new, CA_county_pop, by = "fips") %>% 
+  summarise(county.x, cases, pop_19, new_per_cap = (cases / pop_19)) %>% 
+  ungroup() %>% 
+  slice_max(new_per_cap, n = 5)
+```
+
+```{r}
+knitr::kable(CA_per_cap, caption = "5 Counties with the Most Cumulative Cases Per Capita", col.names = c("County", "Cumulative Cases", "Population", "Cases per Capita"), format.args = list(big.mark = ",")) %>% 
+  kable_styling("striped", full_width = TRUE, font_size = 11) 
+
+knitr::kable(NEW_per_cap, caption = "5 Counties with the Most New Cases Per Capita", col.names = c("County", "New Cases", "Population", "New Cases per Capita"), format.args = list(big.mark = ",")) %>% 
+  kable_styling("striped", full_width = TRUE, font_size = 11)
+```
+
+```{r}
+CA_covid_14 = covid %>% 
+  filter(state == "California", date > max(date) - 14)
+
+CA_14_per100 = CA_covid_14 %>% 
+  group_by(date) %>% 
+  summarize(CA_14_cases = sum(cases)) %>% 
+  mutate(CA_14_100 = (CA_14_cases / 100000))
+
+knitr::kable(CA_14_per100, caption = "Total New Cases in the Last 14 Days per 100,000 People", col.names = c("Date", "Daily Total New Cases", "Daily New Cases per 100,000"), format.args = list(big.mark = ",")) %>% 
+  kable_styling("striped", full_width = TRUE, font_size = 11)
+```
+
+### Result:
+
+```{r}
+total_cases = state_new_cases %>% 
+  filter(date == max(date)) %>% 
+  select(county, cases) %>% 
+  arrange(-cases)
+
+total_new_cases = state_new_cases %>% 
+  group_by(date) %>% 
+  summarize(new_total_cases = sum(cases)) %>% 
+  ungroup() %>% 
+  arrange(-new_total_cases)
+
+safe_counties = inner_join(CA_covid, CA_county_pop, by = "fips") %>% 
+  select(county.x, CA_covid_cases, pop_19) %>% 
+  mutate(most_per_cap = CA_covid_cases / pop_19) %>%
+  arrange(most_per_cap)
+```
+
+```{r}
+knitr::kable(total_cases, caption = "Total Number of Cases", col.names = c("County", "Total Cases"), format.args = list(big.mark = ",")) %>% 
+  kable_styling("striped", full_width = TRUE, font_size = 11)
+
+knitr::kable(total_new_cases, caption = "Total Number of New Cases", col.names = c("Date", "Total New Cases"), format.args = list(big.mark = ",")) %>%
+  kable_styling("striped", full_width = TRUE, font_size = 11)
+
+knitr::kable(safe_counties, caption = "List of Safe Counties", col.names = c("County", "Total Cases", "Population", "Total Cases per Capita"), format.args = list(big.mark = ",")) %>%
+  kable_styling("striped", full_width = TRUE, font_size = 11)
+```
+
+---------------------------------
+
+# Answering Q2:
+
+```{r, message = FALSE, warning = FALSE}
+
+state_level = covid %>% 
+  filter(state %in% c("New York", "California", "Louisiana", "Florida")) %>% 
+  group_by(date, state) %>% 
+  summarize(cases = sum(cases)) %>% 
+  ungroup() %>% 
+  group_by(state) %>% 
+  mutate(new_cases = cases - lag(cases)) %>% 
+  mutate(roll_7 = rollmean(new_cases, 7, na.pad = TRUE, align = "left")) %>% 
+  filter(new_cases > 0)
+  
+ggplot(state_level, aes(x = date)) +
+  geom_col(aes(y = new_cases), col = "#b9a9d6", fill = "#dac8fa") +
+  geom_line(aes(y = roll_7), col = "#8a7ba6", size = .5) +
+  ggthemes::theme_clean() +
+  labs(title = paste("New Cases")) +
+  theme(plot.title = element_text(size = 11, face = 'bold'), plot.background = element_rect(fill = "white"), panel.background = element_rect(fill = "white")) +
+  facet_grid(~state, scales = "free_y")
+  
+```
+
+```{r}
+CAS_PER_CAP = PopulationEstimates %>% 
+  select(POP_ESTIMATE_2019, Area_Name) %>% 
+  right_join(state_level, by = c("Area_Name" = "state")) %>% 
+  mutate(cases_per_cap = (new_cases / POP_ESTIMATE_2019)) %>% 
+  mutate(roll_7 = rollmean(cases_per_cap, 7, na.pad = TRUE, align = "left")) %>% 
+  filter(cases_per_cap > 0)
+
+ggplot(CAS_PER_CAP, aes(x = date)) +
+  geom_col(aes(y = cases_per_cap), col = "#b9a9d6", fill = "#dac8fa") +
+  geom_line(aes(y = roll_7), col = "#8a7ba6", size = .5) +
+  ggthemes::theme_clean() +
+  labs(title = paste("New Cases Per Capita")) +
+  theme(plot.title = element_text(size = 11, face = 'bold'), plot.background = element_rect(fill = "white"), panel.background = element_rect(fill = "white")) +
+  facet_grid(~Area_Name, scales = "free_y")
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
