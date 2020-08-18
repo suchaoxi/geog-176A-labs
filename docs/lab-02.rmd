@@ -1,6 +1,6 @@
 ---
 title: "Geography 176A"
-author: "[Chelsey Su](https://suchaoxi.github.io/geog176a_2020/)"
+author: "[Chelsey Su](https://suchaoxi.github.io)"
 subtitle: 'Lab 02: COVID-19 Pandemic'
 output: 
   html_document:
