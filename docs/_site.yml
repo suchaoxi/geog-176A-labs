@@ -1,1 +1,4 @@
 name: "lab 02"
+navbar:
+  title: "lab 02"
+  href: lab-02.html
