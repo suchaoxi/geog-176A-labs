@@ -222,11 +222,7 @@ value = c("number_zone", "pop_zone_100", "prop_zone_100")
 
 table = data.frame(description, value)
 
-
-kable(table, caption = '100-Mile Zone Facts', 
-      col.names = c("Facts",'Value'), 
-      align = 'l',
-      format.args = list(big.mark = ',')) %>% 
+kable(table, caption = "100-Mile Zone Facts", col.names = c("Facts","Value"), align = "l", format.args = list(big.mark = ",")) %>% 
   kableExtra::kable_styling("striped", full_width = TRUE, font_size = 11)
 ```
 
@@ -246,10 +242,7 @@ ggplot() +
   scale_color_gradient(low = "orange", high = "darkred") +
   gghighlight(dist_to_border < 160) +
   theme_clean() +
-  geom_label_repel(data = nearest_border,
-                   aes(label = city, geometry = geometry),
-                   stat = "sf_coordinates",
-                   size = 3) +
+  geom_label_repel(data = nearest_border, aes(label = city, geometry = geometry), stat = "sf_coordinates", size = 3) +
   labs(col = "Distance to Border (km)", title = "US Cities within 100-miles to US Border", subtitle = "Cities with Distance under 100-miles to US Border Labeled", x = "Longitude", y = "Latitude")
 ```
 
