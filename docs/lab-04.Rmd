@@ -1,0 +1,308 @@
+---
+title: "Geography 176A"
+author: "[Chelsey Su](https://suchaoxi.github.io)"
+subtitle: "Lab 04: Tesselations, Point-in-Polygon"
+output: 
+  html_document:
+    theme: journal
+---
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(sf)
+library(USAboundaries)
+library(readxl)
+library(rmapshaper)
+library(knitr)
+library(leaflet)
+library(mapview)
+library(gridExtra)
+library(gghighlight)
+library(units)
+library(kableExtra)
+library(leafpop)
+```
+
+## Question 1:
+
+```{r}
+counties = us_counties() %>% 
+  filter(!state_name %in% c("Alaska", "Hawaii", "Puerto Rico")) %>% 
+  st_transform(5070)
+```
+
+```{r}
+county_cent = counties %>% 
+  st_centroid(counties) %>% 
+  st_combine()
+```
+
+```{r}
+v_grid = county_cent %>% 
+  st_voronoi() %>% 
+  st_cast() %>% 
+  st_as_sf() %>% 
+  mutate(id = 1:n())
+
+t_grid = county_cent %>% 
+  st_triangulate() %>% 
+  st_cast() %>% 
+  st_as_sf() %>% 
+  mutate(id = 1:n())
+
+s_grid = county_cent %>%
+  st_make_grid(n = 70) %>% 
+  st_cast() %>% 
+  st_as_sf() %>% 
+  mutate(id = 1:n())
+
+h_grid = county_cent %>% 
+  st_make_grid(square = FALSE, n = 70) %>% 
+  st_cast() %>% 
+  st_as_sf() %>% 
+  mutate(id = 1:n())
+```
+
+```{r}
+conus_border = st_union(counties)
+
+plot(conus_border)
+
+npts(conus_border)
+```
+
+```{r}
+simp_border = ms_simplify(conus_border, keep = .1)
+
+plot(simp_border)
+
+npts(simp_border)
+```
+
+I was able to remove 2907=3229-322 points. Consequences of doing this computationally is it increases the speed of computation.
+
+```{r, message = FALSE, warning = FALSE}
+v_grid = st_intersection(v_grid, simp_border)
+```
+
+```{r, message = FALSE, warning = FALSE}
+t_grid = st_intersection(t_grid, simp_border)
+```
+
+```{r}
+tess_plot = function(data, title){
+  ggplot() +
+    geom_sf(data = data, fill = "white", col = "navy", size = .2) +   
+    theme_void() +
+    labs(title = title, caption = paste("This tesselation has:", nrow(data), "tiles" )) +
+    theme(plot.title = element_text(hjust = .5, color =  "navy", face = "bold"))
+}
+```
+
+```{r}
+tess_plot(counties, "Counties")
+tess_plot(v_grid, "Voronoi Coverage")
+tess_plot(t_grid, "Triangulation Coverage")
+tess_plot(s_grid, "Square Coverage")
+tess_plot(h_grid, "Hexagonal Coverage")
+```
+
+
+
+## Question 2:
+
+```{r}
+tess_cal = function(tess_type, tess_name){
+  
+  tess_type = tess_type %>% 
+  mutate(area = st_area(tess_type), area = set_units(area, "km^2"), area = drop_units(area), total_area = sum(area), mean_area = total_area / n(), sd_area = sum(area - mean_area / n()) ^ (1/2), number = length(tess_type$id)
+         )
+  number_of_feature = length(tess_type$id)
+  
+  tess_name = tess_type %>% 
+    mutate(num_feature = number_of_feature, name = tess_name) %>% 
+    select(name, num_feature, mean_area, sd_area, total_area) %>% 
+    st_drop_geometry() %>% 
+    head(1)
+  
+  return(tess_name)
+}
+```
+
+```{r}
+original = counties %>% 
+  mutate(id = 1:n())
+
+tess_cal(counties, "Counties")
+tess_cal(v_grid, "Voronoi Coverage")
+tess_cal(t_grid, "Triangulation Coverage")
+tess_cal(s_grid, "Square Coverage")
+tess_cal(h_grid, "Hexegonal Coverage")
+```
+
+```{r}
+tess_summary = bind_rows(tess_cal(counties, "Counties"), tess_cal(v_grid, "Voronoi Coverage"), tess_cal(t_grid, "Triangulation Coverage"), tess_cal(s_grid, "Square Coverage"), tess_cal(h_grid, "Hexegonal Coverage"))
+
+knitr::kable(tess_summary, caption = "Summary of Tessellations", col.names = c("Tessellation Type", "Number of Features", "Mean Area", "Standard Deviation", "Total Area"), format.args = list(big.mark = ",")) %>% 
+  kable_styling("striped", full_width = TRUE, font_size = 11) 
+```
+
+- With Voronoi tessellation, we can tell it's not much different from the original data, which means it has almost the same precision and computation speed. 
+- With Triangulation tessellation, we notice that the number of features is the highest among all types, which leads the mean area drop as the lowest. The more amount of feature, the slower computation speed is.
+- Square tessellation with the simplified boundry doesn't have a high number of features may fasten the computation speed, but may cause more calculation error with a lower standard deviation and a lower total area.
+- Hexegonal tessellation has the lowest number of features which will fasten the computation speed a lot, but all other datas are so off compared to original data. Computation speed would be faster, but calculation error might increse.
+
+
+
+## Question 3: 
+
+```{r, message = FALSE, warning = FALSE}
+NID2019_U = readxl::read_excel("~/github/geog-176A-labs/data/NID2019_U.xlsx") %>%
+  filter(!is.na(LATITUDE)) %>%
+  filter(!is.na(LONGITUDE))
+
+sf_NID2019_U <- NID2019_U%>% 
+  st_as_sf(coords = c("LONGITUDE", "LATITUDE"), crs = 4326) %>%
+  st_transform(5070)
+```
+
+```{r}
+point_in_polygon3 = function(points, polygon, id){
+  st_join(polygon, points) %>%
+    st_drop_geometry() %>%
+    count(.data[[id]]) %>%
+    setNames(c(id, "n")) %>%
+    left_join(polygon, by = id) %>%
+    st_as_sf()
+}
+```
+
+```{r}
+c_p = point_in_polygon3(sf_NID2019_U, counties, "geoid")
+v_p = point_in_polygon3(sf_NID2019_U, v_grid, "id")
+t_p = point_in_polygon3(sf_NID2019_U, t_grid, "id")
+s_p = point_in_polygon3(sf_NID2019_U, s_grid, "id")
+h_p = point_in_polygon3(sf_NID2019_U, h_grid, "id")
+```
+
+```{r}
+plot_pip = function(data, title){
+  ggplot() +
+    geom_sf(data = data, aes(fill = log(n)), col = NA, alpha = .9, size = .2) +
+    scale_fill_viridis_c() +
+    theme_void() +
+    theme(legend.position = "none", plot.title = element_text(face = "bold", color = "darkgreen", hjust = .5, size = 20)) +
+    labs(title = title, caption = paste0(sum(data$n), " damages represented"))
+}
+```
+
+```{r, messages = FALSE, warning = FALSE}
+plot_pip(c_p, "Damages per Country")
+plot_pip(v_p, "Damages per Voronoi")
+plot_pip(t_p, "Damages per Trianglulation")
+plot_pip(s_p, "Damages per Square")
+plot_pip(h_p, "Damages per Hexagon")
+```
+
+Different tessellation types influences map visualization differently such as the desity of damages.MAUP, the modifiable areal unit problem, is a source of statistical bias that can significantly impact the results of statistical hypothesis tests. In other words, with MAUP, result could be vastly distorted. Compare to square grid tessellation, Voronoi is a lot similar to the original data. Both square grid and Hexagon dominantly lose datas. I prefer Voronoi tessellation because it stores larger range of data which benefits analysis more.
+
+
+
+## Question 4:
+
+The damages with the purpose of recreation, flood control, water supply, and fish and wildlife are the ones I choose.  The reason why I choose these 4 damages is because they are not only interest me the most, but also they have a wide range of data to be analyzed.
+
+```{r}
+dam_rec = sf_NID2019_U %>% 
+  filter(grepl("R", PURPOSES))
+
+dam_flood = sf_NID2019_U %>% 
+  filter(grepl("C", PURPOSES))
+
+dam_water = sf_NID2019_U %>% 
+  filter(grepl("S", PURPOSES))
+
+dam_fish = sf_NID2019_U %>% 
+  filter(grepl("F", PURPOSES))
+```
+
+```{r}
+pip_rec = point_in_polygon3(dam_rec, v_grid, "id")
+pip_flood = point_in_polygon3(dam_flood, v_grid, "id")
+pip_water = point_in_polygon3(dam_water, v_grid, "id")
+pip_fish = point_in_polygon3(dam_fish, v_grid, "id")
+```
+
+```{r}
+plot_pip(pip_rec, "Recreation Damages Location") +
+  gghighlight(n > (mean(n) + sd(n)))
+
+plot_pip(pip_flood, "Flood Control Damages Location") +
+  gghighlight(n > (mean(n) + sd(n)))
+
+plot_pip(pip_water, "Water Supply Damages Location") +
+  gghighlight(n > (mean(n) + sd(n)))
+
+plot_pip(pip_fish, "Fish and Wildlife Damages Location") +
+  gghighlight(n > (mean(n) + sd(n)))
+```
+
+Damage locations seem reasonable generally among all the plots. If I were to pick Hexagonal or square grid tessellation, a few data in fish and wildlife damages would be lost. Recreation damages distribute more in the east coast, as well as Colorado and Southern California where the higher population density is. A big part of flood control damages distribute around Mississippi River which totally make sense because it is the largest drainage system in the Unites States. California experiencing drought is not something new. The most populated state has the largest cattle industry on top of Mediterranean climate. It is also not surprising that fish and wildlife damages distribute more in the Midwest where is the home to them.
+
+
+
+## Extra Credit:
+```{r}
+MS = read_sf("~/github/geog-176A-labs/data/majorrivers_0_0") %>% 
+  filter(SYSTEM == "Mississippi")
+```
+
+```{r}
+dam = NID2019_U %>% 
+  filter(!STATE %in% c("AK", "HI", "GU", "PR")) %>% 
+  filter(HAZARD == "H") %>% 
+  filter(PURPOSES == "C") %>% 
+  group_by(STATE) %>% 
+  slice_max(NID_STORAGE, n = 1)
+```
+
+```{r, message = FALSE}
+max_storage = dam %>% 
+  select(DAM_NAME, PURPOSES, NID_STORAGE, YEAR_COMPLETED)
+```
+
+```{r, message = FALSE}
+radius = dam %>% 
+  mutate(radius = NID_STORAGE / 1500000) %>% 
+  select(radius)
+```
+
+```{r}
+leaflet() %>% 
+  addProviderTiles(providers$CartoDB) %>% 
+  addCircleMarkers(data = dam, color = "purple", fillOpacity = 1, radius = as.vector(radius$radius), stroke = FALSE, popup = popupTable(max_storage, feature.id = FALSE, row.numbers = FALSE)) %>% 
+  addPolylines(data = MS, color = "yellow")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
