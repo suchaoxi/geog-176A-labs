@@ -1,0 +1,219 @@
+---
+title: "Geography 176A"
+author: "[Chelsey Su](https://suchaoxi.github.io)"
+subtitle: "Lab 05: Rasters and Remote Sensing"
+output: 
+  html_document:
+    theme: journal
+---
+
+```{r, message = FALSE, warning = FALSE}
+library(raster)
+library(tidyverse)
+library(getlandsat)
+library(sf)
+library(mapview)
+library(leaflet)
+```
+
+# Question 1:
+
+```{r}
+AOI = read.csv("~/github/geog-176A-labs/data/uscities.csv") %>% 
+  filter(city == "Palo") %>% 
+  st_as_sf(coords = c('lng','lat'), crs = 4326) %>%
+  st_transform(5070) %>%
+  st_buffer(5000) %>%
+  st_bbox() %>%
+  st_as_sfc()
+```
+
+
+
+
+
+#Question 2:
+
+```{r, message = FALSE, warning = FALSE}
+meta = read_csv("../data/palo-flood.csv")
+
+files = lsat_scene_files(meta$download_url) %>%
+  filter(grepl(paste0("B", 1:6, ".TIF$", collapse = "|"), file)) %>%
+  arrange(file) %>% 
+  pull(file)
+
+st = sapply(files, lsat_image)
+
+s = stack(st) %>%
+  setNames(paste0("band", 1:6))
+
+plot(s)
+```
+Dimensions of the stacked image are 7811, 7681, 59996291, 6.
+CRS is UTM on the WGS84 datum.
+Cell resolution is 30*30.
+
+```{r}
+cropper = AOI %>% 
+  st_as_sf() %>% 
+  st_transform(crs(s))
+
+cr_s = crop(s, cropper)
+
+r = cr_s %>% 
+  setNames(c("Coastal Aerosol", "Blue", "Green", "Red", "Near Infrared", "Swir 1"))
+
+plot(r)
+```
+
+Dimensions of the cropped image stack are 340, 346, 117640, 6.
+CRS is also UTM on the WGS84 datum.
+Cell resolution is 30*30 as well.
+
+
+
+
+
+# Question 3:
+
+```{r}
+plotRGB(r, r = 4, g = 3, b = 2)
+print("R-G-B (natural color)")
+
+plotRGB(r, r = 5, g = 4, b = 3)
+print("NIR-R-G(fa) (color infrared)")
+
+plotRGB(r, r = 5, g = 6, b = 4)
+print("NIR-SWIR1-R (false color water focus)")
+
+plotRGB(r, r = 7, g = 5, b = 3)
+print("SWIR2-SWIR1-R")
+```
+
+```{r}
+plotRGB(r, r = 4, g = 3, b = 2, stretch = "lin")
+print("R-G-B (natural color)")
+
+plotRGB(r, r = 5, g = 4, b = 3, stretch = "lin")
+print("NIR-R-G(fa) (color infrared)")
+
+plotRGB(r, r = 5, g = 6, b = 4, stretch = "hist")
+print("NIR-SWIR1-R (false color water focus)")
+
+plotRGB(r, r = 7, g = 5, b = 3, stretch = "hist")
+print("SWIR2-SWIR1-R")
+```
+
+Color stretch will emphasize the contrast of an image. Data will be shown more prominently. 
+
+
+
+
+
+# Question 4:
+
+```{r}
+ndvi = (r$Near.Infrared - r$Red) / (r$Near.Infrared + r$Red)
+
+ndwi = (r$Green - r$Near.Infrared) / (r$Green + r$Near.Infrared)
+
+mndwi = (r$Green - r$Swir.1) / (r$Green + r$Swir.1)
+
+wri = (r$Green + r$Red) / (r$Near.Infrared + r$Swir.1)
+
+swi = 1 / (sqrt(r$Blue - r$Swir.1))
+
+stack = stack(ndvi, ndwi, mndwi, wri, swi) %>% 
+  setNames(c("NDVI", "NDWI", "MNDWI", "WRI", "SWI"))
+
+plot(stack, col = colorRampPalette(c("blue", "white", "red"))(256))
+```
+
+NDVI and SWI both prominent the water in blue, but NDVI has other information shown like land while SWI only picks up the water cells. NDWI, MNDWI, and WRI pick up the water cells in red, land in contrast while flood land will be deviated differently.
+
+```{r}
+thresholding1 = function(x) {ifelse(x <= 0, 1, 0)}
+thresholding2 = function(x) {ifelse(x >= 0, 1, 0)}
+thresholding3 = function(x) {ifelse(x >= 0, 1, 0)}
+thresholding4 = function(x) {ifelse(x >= 1, 1, 0)}
+thresholding5 = function(x) {ifelse(x <= 5, 1, 0)}
+
+flood1 = calc(ndvi, thresholding1)
+flood2 = calc(ndwi, thresholding2)
+flood3 = calc(mndwi, thresholding3)
+flood4 = calc(wri, thresholding4)
+flood5 = calc(swi, thresholding5)
+
+flood = stack(flood1, flood2, flood3, flood4, flood5) %>% 
+  setNames(c("NDVI", "NDWI", "MNDWI", "WRI", "SWI")) 
+
+plot(flood, col = colorRampPalette(c("white", "blue"))(256))
+flood[is.na(flood)] = 0
+```
+
+
+
+
+
+# Question 5:
+
+```{r}
+set.seed(09062020)
+values = getValues(r)
+dim(values)
+```
+The dimension of the extracted values are 117,640 rows and 6 columns. It shows the value are extracted from 705,840=117,640*6.
+```{r}
+idx = which.max(table1[2,])
+
+v = na.omit(values)
+
+e = kmeans(v, 12, iter.max = 100)
+
+kmeans_raster = stack$NDVI
+
+values(kmeans_raster) <- e$cluster
+
+plot(kmeans_raster)
+```
+
+```{r}
+table(getValues(flood5), getValues(kmeans_raster))
+```
+
+```{r}
+thresholding6 = function(x){ifelse(x == 1, 1, 0)}
+
+flood6 = calc(kmeans_raster, thresholding6)
+
+FLOOD = flood %>%
+  addLayer(flood6) %>%
+  setNames(c("NDVI", "NDWI", "MNDWI", "WRI", "SWI", "K-MEANS"))
+
+FLOOD[is.na(FLOOD)] = 0
+
+plot(flood, col = colorRampPalette(c("blue", "white"))(256))
+```
+
+
+
+
+
+# Question 6:
+
+```{r}
+k_table = cellStats(FLOOD, sum)
+
+knitr::kable(k_table, caption = "The Number of Flooded Cells", col.names = c("Number of Cells")) 
+```
+
+```{r}
+flood_area = calc(FLOOD, sum) * (30^2)
+plot(flood_area, col = blues9)
+flood_area[flood_area == 0] = NA
+```
+
+```{r}
+mapview(flood_area)
+```
+The reason why some of the cell values not an even number is some raster values are not even, they will come out not even numbers. 
