@@ -6,6 +6,9 @@ output:
   html_document:
     theme: journal
 ---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, out.width = "75%", fig.align = 'center')
+```
 
 ```{r, warning = FALSE, message = FALSE}
 library(tidyverse)

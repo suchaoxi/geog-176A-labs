@@ -6,6 +6,9 @@ output:
   html_document:
     theme: journal
 ---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, out.width = "75%", fig.align = 'center')
+```
 
 ```{r, message = FALSE, warning = FALSE}
 library(raster)
@@ -13,7 +16,6 @@ library(tidyverse)
 library(getlandsat)
 library(sf)
 library(mapview)
-library(leaflet)
 ```
 
 # Question 1:
@@ -217,3 +219,17 @@ flood_area[flood_area == 0] = NA
 mapview(flood_area)
 ```
 The reason why some of the cell values not an even number is some raster values are not even, they will come out not even numbers. 
+
+
+
+
+
+# Question 7:
+
+```{r}
+location = st_point(c(42.063057, -91.789480)) %>%
+  st_sfc(crs = 4326) %>% 
+  st_transform(crs(FLOOD)) 
+
+raster::extract(FLOOD, location)
+```
