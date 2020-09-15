@@ -1,0 +1,190 @@
+---
+title: "Geography 176A"
+author: "[Chelsey Su](https://suchaoxi.github.io)"
+subtitle: "Lab 06: Flood Risk in Mission Creek: Past, Present, Future"
+output: 
+  html_document:
+    theme: journal
+---
+
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(sf)
+library(raster)
+library(fasterize)
+library(whitebox)
+library(osmdata)
+library(elevatr)
+library(gifski)
+```
+
+# Collecting Data:
+```{r}
+basin = read_sf("https://labs.waterdata.usgs.gov/api/nldi/linked-data/nwissite/USGS-11119750/basin")
+```
+
+```{r, message = FALSE, warning = FALSE, echo = FALSE}
+elev = elevatr::get_elev_raster(basin, z = 13) %>% 
+  crop(basin) %>% 
+  mask(basin)
+
+elev = elev * 3.281
+
+writeRaster(elev, "~/github/geog-176A-labs/data/basin_elevation.tif", overwrite = TRUE)
+```
+
+```{r, message = FALSE, warning = FALSE, echo = FALSE}
+elev_raster = raster("~/github/geog-176A-labs/data/basin_elevation.tif")
+```
+
+```{r, message = FALSE, warning = FALSE, echo = FALSE}
+bb = st_bbox(basin) %>% 
+  st_as_sfc() %>% 
+  st_transform(4326)
+
+build_basin = osmdata::opq(bb) %>% 
+  add_osm_feature(key = "building") %>% 
+  osmdata_sf()
+
+railway = opq(bb) %>% 
+  add_osm_feature(key = "railway", value = "station" ) %>%
+  osmdata_sf()
+
+stream = opq(bb) %>%
+  add_osm_feature(key = "waterway", value = "stream") %>%
+  osmdata_sf()
+
+building_point = build_basin$osm_points %>% 
+  st_intersection(basin) %>% 
+  st_transform(crs(basin))
+
+building_poly = build_basin$osm_polygons %>% 
+  st_intersection(basin) %>% 
+  st_transform(crs(basin))
+
+basin_stream = stream$osm_lines %>% 
+  st_intersection(basin) %>% 
+  st_transform(crs(basin))
+
+railway_point = railway$osm_points %>% 
+  st_intersection(basin) %>% 
+  st_transform(crs(basin))
+```
+
+# Terrain Analysis
+```{r, message = FALSE, warning = FALSE, echo = FALSE, evel = FALSE}
+wbt_hillshade("~/github/geog-176A-labs/data/basin_elevation.tif", "~/github/geog-176A-labs/data/basin_hillshade.tif")
+```
+
+```{r, message = FALSE, warning = FALSE, echo = FALSE}
+hillshade = raster("~/github/geog-176A-labs/data/basin_hillshade.tif")
+
+plot(hillshade, col = gray.colors(256, alpha = .5), main = "Basin and Stream", legend = F, box = F)
+
+plot(basin_stream, add = TRUE, col = "blue")
+
+plot(basin, add = TRUE)
+```
+
+```{r}
+stream_buffer = basin_stream %>% 
+  st_transform(5070) %>% 
+  st_buffer(10) %>% 
+  st_transform(4326)
+
+stream_raster = fasterize::fasterize(stream_buffer, elev_raster)
+
+writeRaster(stream_raster, "../data/stream-raster.tif", overwrite = T)
+```
+
+```{r}
+wbt_breach_depressions("~/github/geog-176A-labs/data/basin_elevation.tif", "~/github/geog-176A-labs/data/breach-depressions.tif")
+
+wbt_elevation_above_stream("~/github/geog-176A-labs/data/breach-depressions.tif", "~/github/geog-176A-labs/data/stream_raster.tif", "~/github/geog-176A-labs/data/hand_raster.tif")
+```
+
+```{r}
+hand_raster = raster("~/github/geog-176A-labs/data/hand_raster.tif")
+
+flood_raster = raster("~/github/geog-176A-labs/data/stream_raster.tif")
+
+offset_raster = hand_rast + 3.69
+
+offset_raster[flood_raster == 1] = 0
+
+writeRaster(offset_raster, "~/github/geog-176A-labs/data/offset_basin.tif", overwrite = TRUE)
+```
+
+# 2017 Impact Assessment:
+```{r}
+plot(basin, box = FALSE, add = TRUE)
+
+plot(hillshade, col = gray.colors(256, alpha = .5), box = FALSE, main = "Basin and Flood", legend = FALSE)
+
+plot(offset_raster, col = rev(blues9), box = FALSE, add = TRUE, legend = FALSE)
+
+plot(railway_point, col = "green", box = FALSE, add = TRUE, cex = 1, pch = 16)
+```
+The map does look accurate. Railway staion is covered and within the flood zone.
+
+```{r}
+building_points = ifelse(!is.na(raster::extract(offset_raster, building_point)), "red", "black")
+```
+
+```{r}
+plot(hillshade, col = gray.colors(256, alpha = .5), main = paste("2017 Mission Creek Basin Flood Area Affected", sum(building_points == "red"), "Buildings Affected"), legend = FALSE, box =FALSE)
+
+plot(offset_raster, add = TRUE, col = rev(blues9), legend = FALSE, box = FALSE)
+
+plot(basin, add = TRUE, box = FALSE)
+
+plot(railway, col = "green", cex = 1, pch = 16, add = TRUE, box = FALSE)
+
+plot(building_point, add = TRUE, col = building_points, cex = .08, pch = 16)
+```
+
+# Flood Inudation Map library:
+```{r}
+sb = AOI::aoi_get("Santa Barbara")
+```
+
+```{r}
+hillshade_sb =  raster("~/github/geog-176A-labs/data/basin_hillshade.tif") %>% 
+  crop(sb)
+
+gif_rast =  offset_raster %>% 
+  crop(sb)
+
+building_gif <- st_intersection(basin, building_point)
+```
+
+```{r}
+save_gif({
+  for(i in 1:20){
+    flood_gif <- gif_rast
+    values(flood_gif)[which(values(flood_gif) > i)] <- NA
+    
+    building_flood <- raster::extract(flood_gif, building_gif)
+    building_gif$flooded <- as.factor(ifelse(!is.na(building_flood), 1, 0))
+    
+    plot(hillshade_gif, col = gray.colors(256, alpha = .5), main = paste("Flood Impact:", sum(building_gif$flooded==1) ,"Buildings Impacted,", i, "Foot Stage"), legend = FALSE, box = FALSE)
+    plot(flood_gif, col = rev(blues9), add = TRUE, legend = FALSE, box = FALSE)
+    plot(building_point, col = c("black", "red")[building_gif$flooded], add = TRUE, cex = .15, pch = 16, box = FALSE)
+    plot(railway_point, col = "green", add = TRUE, cex = 1, pch = 16, box = FALSE)
+    plot(basin, add = TRUE, box = FALSE)
+    legend(x = "topright", legend = c("Not Flooded", "Flooded"), col = c("black", "red"), cex = .75, pch = 16)
+  }
+  
+}, gif_file = "~/github/geog-176A-labs/data/mission-creek-fim.gif",
+   width = 600, height = 600, 
+   delay = .7, loop = TRUE)
+```
+We are capturing impacted buildings at 0 stage becuase we set the buffer at 10 meters.
+
+
+
+
+
+
+
+
